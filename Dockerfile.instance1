@@ -1,0 +1,94 @@
+# Используем образ с CUDA для правильной работы GPU
+FROM nvidia/cuda:12.6.0-runtime-ubuntu22.04
+
+#ENV PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+# Установка Python 3.12 и системных зависимостей одним слоем
+RUN apt-get -o Acquire::Retries=5 -o Acquire::ForceIPv4=true update && \
+    apt-get -o Acquire::Retries=5 -o Acquire::ForceIPv4=true install -y --no-install-recommends \
+    software-properties-common && \
+    add-apt-repository ppa:deadsnakes/ppa && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+    python3.12 \
+    python3.12-dev \
+    python3.12-venv \
+    python3-pip \
+    ca-certificates \
+    curl \
+    git \
+    build-essential \
+    libglib2.0-0 \
+    wget \
+    libgl1 \
+    libglx-mesa0 \
+    libegl1 \
+    libglvnd0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    libgomp1 && \
+    rm -rf /var/lib/apt/lists/* && \
+    # Делаем Python 3.12 по умолчанию
+    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1 && \
+    update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1 && \
+    # Устанавливаем pip для Python 3.12
+    curl -sS https://bootstrap.pypa.io/get-pip.py | python3.12
+
+# Обновляем pip
+RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel
+
+WORKDIR /app
+
+# Копируем только requirements сначала для кеширования слоя
+COPY requirements.txt .
+
+# Устанавливаем PyTorch с CUDA 12.6 (без версии из requirements.txt)
+RUN pip install --no-cache-dir \
+    torch torchvision torchaudio \
+    --index-url https://download.pytorch.org/whl/cu126
+
+# Устанавливаем основные зависимости (кроме torch, torchvision, torchaudio которые уже установили)
+RUN grep -vE "^torch(vision|audio)?$" requirements.txt > requirements_filtered.txt && \
+    pip install --no-cache-dir -r requirements_filtered.txt
+
+# Копируем исходный код приложения
+COPY main.py .
+COPY *.py ./
+COPY comfy/ ./comfy/
+COPY comfy_extras/ ./comfy_extras/
+COPY comfy_execution/ ./comfy_execution/
+COPY comfy_api/ ./comfy_api/
+COPY comfy_api_nodes/ ./comfy_api_nodes/
+COPY comfy_config/ ./comfy_config/
+COPY middleware/ ./middleware/
+COPY alembic_db/ ./alembic_db/
+COPY alembic.ini ./alembic.ini
+COPY utils/ ./utils/
+COPY app/ ./app/
+COPY api_server/ ./api_server/
+
+# НЕ копируем custom_nodes, т.к. он монтируется как volume!
+# Но копируем requirements файлы для установки зависимостей если они есть
+
+
+# Создаем необходимые директории
+RUN mkdir -p models/checkpoints models/vae models/loras models/embeddings \
+    models/vae_approx output temp input input/3d user/default
+
+EXPOSE 8889
+
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD wget --quiet --tries=1 --spider http://localhost:8889/ || exit 1
+
+# Оптимизированная команда запуска
+CMD ["python", "main.py", \
+     "--listen", "0.0.0.0", \
+     "--port", "8889", \
+     "--preview-method", "taesd", \
+     "--gpu-only", \
+     "--disable-metadata"]
+

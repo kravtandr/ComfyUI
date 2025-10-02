@@ -1,0 +1,73 @@
+services:
+  comfyui-gpu0:
+    build:
+      context: .
+      dockerfile: Dockerfile.instance1
+    
+    ports:
+      - "8889:8889"
+    
+    # КРИТИЧНО: увеличиваем shared memory для PyTorch/CUDA
+    shm_size: '48gb'
+    
+    volumes:
+      # Примонтируем директории для хранения моделей и выходных данных
+      - ./login:/app/login
+      - ./models:/app/models
+      - ./output:/app/output
+      - ./temp:/app/temp
+      - ./custom_nodes:/app/custom_nodes
+      - ./input:/app/input
+      - ./user/default:/app/user/default
+    
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['0']  # Используем только карту с индексом 0 (первая карта)
+              capabilities: [gpu]
+        # Ограничиваем ресурсы для предотвращения перегрузки
+        limits:
+          memory: 56G  # Настройте под вашу систему
+    
+    restart: unless-stopped
+    
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=0
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
+      # Оптимизации для PyTorch
+      - CUDA_DEVICE_ORDER=PCI_BUS_ID
+      - OMP_NUM_THREADS=8  # Настройте под количество CPU ядер
+      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
+    
+    networks:
+      app_net:
+        aliases:
+          - comfyui-gpu0-fast
+    
+    # Healthcheck для мониторинга
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8889/"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+    
+    # Настройка логирования
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+    
+    # Graceful shutdown
+    stop_grace_period: 30s
+
+networks:
+  app_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
