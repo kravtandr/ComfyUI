@@ -16,7 +16,7 @@ services:
       - ./models:/app/models
       - ./output:/app/output
       - ./temp:/app/temp
-      - ./custom_nodes:/app/custom_nodes
+      - ./custom_nodes:/app/custom_nodes  # Volume для добавления новых custom_nodes
       - ./input:/app/input
       - ./user/default:/app/user/default
     
@@ -40,6 +40,12 @@ services:
       - CUDA_DEVICE_ORDER=PCI_BUS_ID
       - OMP_NUM_THREADS=8  # Настройте под количество CPU ядер
       - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
+      # Docker host access
+      - DOCKER_HOST_INTERNAL=host.docker.internal
+    
+    # Добавляем host.docker.internal для доступа к хосту
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     
     networks:
       app_net:

@@ -70,9 +70,18 @@ COPY utils/ ./utils/
 COPY app/ ./app/
 COPY api_server/ ./api_server/
 
-# НЕ копируем custom_nodes, т.к. он монтируется как volume!
-# Но копируем requirements файлы для установки зависимостей если они есть
+# Копируем custom_nodes во встроенную директорию
+COPY custom_nodes/ ./custom_nodes_builtin/
 
+# Устанавливаем базовые зависимости из встроенных custom_nodes
+RUN find custom_nodes_builtin -name "requirements.txt" -type f | while read req_file; do \
+        echo "Installing dependencies from: $req_file"; \
+        pip install --no-cache-dir -r "$req_file" || echo "Failed to install from $req_file, continuing..."; \
+    done
+
+# Копируем entrypoint скрипт
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Создаем необходимые директории
 RUN mkdir -p models/checkpoints models/vae models/loras models/embeddings \
@@ -84,11 +93,13 @@ EXPOSE 8889
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD wget --quiet --tries=1 --spider http://localhost:8889/ || exit 1
 
+# Устанавливаем entrypoint
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+
 # Оптимизированная команда запуска
 CMD ["python", "main.py", \
      "--listen", "0.0.0.0", \
      "--port", "8889", \
-     "--preview-method", "taesd", \
      "--gpu-only", \
      "--disable-metadata"]
 
